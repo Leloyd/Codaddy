@@ -200,9 +200,36 @@ def api_runtime():
     return jsonify({"base_hours": base, "new_hours": new, "load_watts": latest["load_watts"], "shed": shed})
 
 
+@app.route("/api/heatmap")
+def api_heatmap():
+    days = max(1, min(int(request.args.get("days", 7)), 31))
+    today = datetime.now().date()
+    since = datetime.combine(today - timedelta(days=days - 1), datetime.min.time())
+    rows = db.query("SELECT timestamp, efficiency_pct, irradiance_wm2 FROM telemetry_logs "
+                    "WHERE timestamp >= %s ORDER BY timestamp", (since,))
+    return jsonify(diagnostics.efficiency_heatmap(rows, days, range(6, 19), today))
+
+
+@app.route("/api/uptime")
+def api_uptime():
+    hours = max(1, min(int(request.args.get("hours", 24)), 168))
+    end = datetime.now().replace(microsecond=0)
+    start = end - timedelta(hours=hours)
+    rows = db.query("SELECT timestamp, source FROM telemetry_logs WHERE timestamp >= %s ORDER BY timestamp",
+                    (start - diagnostics.MAX_GAP,))
+    res = diagnostics.uptime_buckets(rows, start, end, bucket=timedelta(minutes=hours * 60 / 96))
+    gaps = [b for b in res["buckets"] if b["status"] != "ok"]
+    res.update(readings=sum(b["count"] for b in res["buckets"]),
+               longest_gap_s=max((b["longest_gap_s"] for b in res["buckets"]), default=0),
+               last_gap=_iso(gaps[-1])["start"] if gaps else None)
+    res["buckets"] = [_iso(b) for b in res["buckets"]]
+    return jsonify(res)
+
+
 def create_app():
     db.init_db()
     simulator.write_demo_recording(db.get_config())
+    poller.epoch = datetime.now().replace(microsecond=0)  # judge this session's readings, not old/seed history
     if os.environ.get("EMBEDDED_POLLER", "1") == "1":
         poller.start_thread()
     logging.getLogger("solarbridge").info("Storage backend: %s", db.BACKEND)

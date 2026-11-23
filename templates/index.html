@@ -266,6 +266,51 @@
       <p class="mt-4 text-[12px] text-faint" id="impactNote">—</p>
     </section>
 
+    <!-- ───────────── Row 4 · efficiency heatmap + gateway uptime ───────────── -->
+    <section class="sb-card sb-rise col-span-12 xl:col-span-8" style="--i:9" aria-labelledby="hmTitle">
+      <header class="sb-card-head flex-wrap gap-y-2">
+        <div>
+          <h2 id="hmTitle" class="sb-eyebrow">Efficiency by Hour · Last 7 Days</h2>
+          <p class="mt-1 text-[12px] text-mute">Shading shows up as the same cold hour every day. Soiling shows up as a slow fade across all hours.</p>
+        </div>
+        <div class="flex items-center gap-3 text-[11px] text-mute font-mono" aria-hidden="true">
+          <span class="sb-hm-key"><i data-b="coral"></i>&lt;70</span>
+          <span class="sb-hm-key"><i data-b="amber"></i>70–85</span>
+          <span class="sb-hm-key"><i data-b="solar"></i>≥85%</span>
+          <span class="sb-hm-key"><i data-b="none"></i>no data</span>
+        </div>
+      </header>
+      <div class="sb-hm" id="heatmap" role="grid" aria-label="Average efficiency per hour for the last seven days"></div>
+      <p class="mt-3 h-4 font-mono text-[12px] text-mute tabular-nums" id="hmReadout">Hover a cell for details</p>
+    </section>
+
+    <section class="sb-card sb-rise col-span-12 xl:col-span-4 flex flex-col" style="--i:10" aria-labelledby="upTitle">
+      <header class="sb-card-head"><h2 id="upTitle" class="sb-eyebrow">Gateway Uptime · 24H</h2>
+        <span class="sb-state" id="upState" data-tone="ink">—</span></header>
+      <div class="flex items-baseline gap-2">
+        <div class="sb-kpi"><span data-num="uptime" data-dec="1">0</span><small>%</small></div>
+        <span class="text-[12px] text-mute">of the last 24 h logged locally</span>
+      </div>
+      <div class="sb-ribbon mt-4" id="ribbon" role="img" aria-label="Gateway polling health over the last 24 hours"></div>
+      <div class="mt-1.5 flex justify-between font-mono text-[10.5px] text-faint tabular-nums" aria-hidden="true">
+        <span id="ribbonStart">−24h</span><span>−12h</span><span>now</span>
+      </div>
+      <p class="mt-2 h-4 font-mono text-[12px] text-mute tabular-nums" id="ribbonReadout"></p>
+      <ul class="sb-up-legend mt-4" aria-label="Legend">
+        <li><i style="background:var(--solar)"></i>Live gateway</li>
+        <li><i style="background:var(--cobalt)"></i>Demo replay</li>
+        <li><i style="background:var(--solar);opacity:.45"></i>Seed history</li>
+        <li><i style="background:var(--amber)"></i>Gaps &gt; 10 min</li>
+        <li><i style="background:var(--line-strong)"></i>Edge syncing / offline</li>
+      </ul>
+      <p class="mt-3 mb-4 text-[12px] leading-relaxed text-mute">Readings are written to the local database before anything else, so an internet outage loses nothing. Only time the hotspot itself is unreachable shows up as a gap.</p>
+      <dl class="mt-auto grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-line bg-line pt-0">
+        <div class="bg-card px-3 py-2.5"><dt class="sb-eyebrow">Readings</dt><dd class="sb-mono-lg text-[17px]"><span data-num="up_readings">0</span></dd></div>
+        <div class="bg-card px-3 py-2.5"><dt class="sb-eyebrow">Longest gap</dt><dd class="sb-mono-lg text-[17px]" id="upGap">—</dd></div>
+        <div class="bg-card px-3 py-2.5"><dt class="sb-eyebrow">Last outage</dt><dd class="sb-mono-lg text-[17px]" id="upLast">—</dd></div>
+      </dl>
+    </section>
+
   </div>
 </main>
 

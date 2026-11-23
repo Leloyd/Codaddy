@@ -190,7 +190,7 @@ def insert_telemetry(r):
     )
 
 
-def seed_history(hours=48):
+def seed_history(hours=168):
     """Backfill synthetic history so charts, impact and report are populated on first boot."""
     import simulator
     import diagnostics
@@ -198,14 +198,24 @@ def seed_history(hours=48):
     cfg = get_config()
     now = datetime.now().replace(second=0, microsecond=0)
     start = now - timedelta(hours=hours)
-    sim = simulator.Simulator(cfg, scenario="soiling_mild", realtime_sun=True, soc=70)
+    sim = simulator.Simulator(cfg, scenario="optimal", realtime_sun=True, soc=70)
     rows = []
     t = start
     while t < now:
+        sim.soc = min(sim.soc, 88.0)  # seed site's daytime loads keep the bank below full (no curtailment)
         r = sim.step(t, dt_sec=300)
+        # Demo story for the heatmap: dust builds up over the week (97% → ~85%) and a
+        # neighbour's tree shades the array every afternoon 15:00–16:00 (current drops, voltage holds).
+        progress = (t - start) / (now - start)
+        factor = (1 - 0.13 * progress) / 0.97
+        if t.hour == 15:
+            factor *= 0.58
+        r["pv_watts"] = round(r["pv_watts"] * factor, 1)
+        r["pv_amps"] = round(r["pv_amps"] * factor, 2)
         r["expected_pv_watts"] = diagnostics.expected_pv_watts(
             r["irradiance_wm2"], r["ambient_temp_c"], cfg["panel_rated_watts"])
-        r["efficiency_pct"] = diagnostics.efficiency_pct(r["pv_watts"], r["expected_pv_watts"])
+        r["efficiency_pct"] = (None if diagnostics.curtailed(r) else
+                               diagnostics.efficiency_pct(r["pv_watts"], r["expected_pv_watts"]))
         r["source"], r["weather_source"] = "seed", "model"
         rows.append(r)
         t += timedelta(minutes=5)

@@ -8,6 +8,7 @@ const withAlpha = (hex, a) => {
 export function createYieldChart(canvas, tipEl) {
   let hours = 6;
   let gapTone = "amber";
+  let animateNext = true;   // animate on first paint and range changes only; live refreshes update in place
 
   const fmtTime = (ms) => {
     const t = new Date(ms);
@@ -94,7 +95,7 @@ export function createYieldChart(canvas, tipEl) {
 
   return {
     theme,
-    setRange(h) { hours = h; },
+    setRange(h) { hours = h; animateNext = true; },
     setGapTone(tone) { if (tone !== gapTone) { gapTone = tone; theme(); } },
     setData(rows) {
       const xs = rows.map((r) => new Date(r.timestamp).getTime());
@@ -102,7 +103,8 @@ export function createYieldChart(canvas, tipEl) {
       chart.data.datasets[1].data = rows.map((r, i) => ({ x: xs[i], y: r.pv_watts }));
       chart.options.scales.x.min = Date.now() - hours * 3600e3;
       chart.options.scales.x.max = Date.now();
-      chart.update();
+      chart.update(animateNext ? undefined : "none");
+      animateNext = false;
     },
   };
 }

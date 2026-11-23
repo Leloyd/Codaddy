@@ -178,8 +178,8 @@ class Poller:
 
         reading["expected_pv_watts"] = diagnostics.expected_pv_watts(
             reading.get("irradiance_wm2"), reading.get("ambient_temp_c"), cfg["panel_rated_watts"])
-        reading["efficiency_pct"] = diagnostics.efficiency_pct(
-            reading.get("pv_watts"), reading["expected_pv_watts"])
+        reading["efficiency_pct"] = (None if diagnostics.curtailed(reading) else
+                                     diagnostics.efficiency_pct(reading.get("pv_watts"), reading["expected_pv_watts"]))
         db.insert_telemetry(reading)
         self.run_rules(cfg)
         return reading

@@ -47,3 +47,29 @@ def test_parse_gateway_json_and_html():
     assert j == {"pv_volts": 36.2, "pv_amps": 10.0, "bat_volts": 26.3, "bat_soc": 81.0, "load_watts": 300.0, "pv_watts": 362.0}
     h = parse_gateway_payload("<tr><td>PV Power</td><td>512 W</td></tr><tr><td>SOC</td><td>64 %</td></tr>")
     assert h["pv_watts"] == 512 and h["bat_soc"] == 64
+
+
+def test_heatmap_averages_lit_readings_per_hour():
+    day = datetime(2026, 1, 7)
+    rows = [{"timestamp": day.replace(hour=10, minute=m), "efficiency_pct": e, "irradiance_wm2": 800}
+            for m, e in ((0, 90), (30, 70))] + [{"timestamp": day.replace(hour=11), "efficiency_pct": 50, "irradiance_wm2": 50}]
+    hm = d.efficiency_heatmap(rows, 2, range(9, 12), day.date())
+    assert hm["days"] == ["2026-01-06", "2026-01-07"]
+    assert hm["cells"][1] == [None, {"eff": 80.0, "n": 2}, None]   # dim 11:00 reading ignored
+    assert hm["cells"][0] == [None, None, None]
+
+
+def test_uptime_flags_gaps():
+    t0 = datetime(2026, 1, 1, 0, 0)
+    rows = [{"timestamp": t0 + timedelta(minutes=5 * i), "source": "sim"} for i in range(12)]   # first hour only
+    res = d.uptime_buckets(rows, t0, t0 + timedelta(hours=2), bucket=timedelta(minutes=30))
+    assert [b["status"] for b in res["buckets"]] == ["ok", "ok", "gap", "gap"]
+    assert res["uptime_pct"] == 50.0
+
+
+def test_full_battery_curtailment_is_not_a_fault():
+    r = reading(eff=40, amps=8, volts=36)
+    r.update(bat_soc=100, pv_watts=260, load_watts=250)
+    assert d.curtailed(r)
+    assert d.classify([reading() for _ in range(5)] + [r])["state"] == "CURTAILED"
+    assert not d.curtailed({"bat_soc": 80, "pv_watts": 260, "load_watts": 250})

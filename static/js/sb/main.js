@@ -13,6 +13,7 @@ const HEADLINE = {
   SHADING: "Time-of-day shading",
   FAULT: "String fault — open circuit",
   IDLE: "Not enough sun to judge",
+  CURTAILED: "Battery full — PV curtailed",
 };
 const ACTION = {
   SOILING: { label: "Log panel cleaning", icon: "spray-can", done: "Cleaning logged — soiling alerts resolved" },
@@ -105,7 +106,7 @@ function renderLive(d) {
   const ni = nb.querySelector("svg");
   if (ni) ni.style.transform = net.direction === "discharging" ? "rotate(180deg)" : "";
 
-  $("effState").textContent = dx.state === "IDLE" ? "Low light" : dx.label;
+  $("effState").textContent = dx.state === "IDLE" ? "Low light" : dx.label;  // CURTAILED → "Battery Full"
   $("effState").dataset.tone = tone;
   const eb = $("effBar");
   eb.style.width = `${Math.min(100, dx.efficiency || 0)}%`;
@@ -259,6 +260,82 @@ async function refreshAlerts() {
   }
 }
 
+// ─────────────────────────────────────────────── heatmap & uptime ribbon ──
+const dayFmt = (iso) => new Date(`${iso}T00:00`).toLocaleDateString([], { weekday: "short" });
+const durFmt = (s) => (s < 90 ? `${s}s` : s < 5400 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`);
+
+function cellColor(eff) {
+  if (eff >= 85) return ["solar", `color-mix(in srgb, var(--solar) ${Math.round(45 + Math.min(1, (eff - 85) / 15) * 55)}%, var(--sunk))`];
+  if (eff >= 70) return ["amber", `color-mix(in srgb, var(--amber) ${Math.round(55 + ((85 - eff) / 15) * 40)}%, var(--sunk))`];
+  return ["coral", `color-mix(in srgb, var(--coral) ${Math.round(60 + Math.min(1, (70 - eff) / 50) * 40)}%, var(--sunk))`];
+}
+
+function renderHeatmap(hm) {
+  const el = $("heatmap"), readout = $("hmReadout");
+  const now = new Date(), todayIdx = hm.days.length - 1;
+  const frag = document.createDocumentFragment();
+  const lbl = (txt, cls = "lbl") => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
+  hm.days.forEach((day, di) => {
+    frag.append(lbl(di === todayIdx ? "Today" : dayFmt(day)));
+    hm.hours.forEach((h, hi) => {
+      const c = document.createElement("span"), v = hm.cells[di][hi];
+      c.className = "c" + (di === todayIdx && h === now.getHours() ? " now" : "");
+      c.setAttribute("role", "gridcell");
+      const label = `${di === todayIdx ? "Today" : dayFmt(day)} ${String(h).padStart(2, "0")}:00`;
+      if (v) {
+        const [band, color] = cellColor(v.eff);
+        c.dataset.b = band; c.style.background = color;
+        c.dataset.tip = `${label} · ${v.eff.toFixed(1)}% of expected · ${v.n} readings`;
+      } else c.dataset.tip = `${label} · no lit readings`;
+      c.setAttribute("aria-label", c.dataset.tip);
+      frag.append(c);
+    });
+  });
+  frag.append(lbl(""));
+  hm.hours.forEach((h) => frag.append(lbl(h % 2 === 0 ? String(h).padStart(2, "0") : "", "lbl h")));
+  el.replaceChildren(frag);
+  if (!el.dataset.wired) {
+    el.dataset.wired = "1";
+    el.addEventListener("pointerover", (e) => { if (e.target.dataset.tip) readout.textContent = e.target.dataset.tip; });
+    el.addEventListener("pointerleave", () => (readout.textContent = "Hover a cell for details"));
+  }
+}
+
+function renderUptime(u) {
+  setNum("uptime", u.uptime_pct);
+  setNum("up_readings", u.readings);
+  $("upGap").textContent = u.longest_gap_s ? durFmt(u.longest_gap_s) : "none";
+  $("upLast").textContent = u.last_gap ? new Date(u.last_gap).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "none";
+  const st = $("upState");
+  const recent = u.buckets.slice(-2).some((b) => b.status !== "ok");
+  st.dataset.tone = recent ? "amber" : u.uptime_pct >= 98 ? "solar" : "amber";
+  st.textContent = recent ? "Edge syncing" : u.uptime_pct >= 98 ? "No data lost" : "Gaps logged";
+
+  const el = $("ribbon"), readout = $("ribbonReadout");
+  const SRC = { live: "live gateway", sim: "simulated", replay: "replay", seed: "seed history", mock: "mock" };
+  const STATUS = { ok: "logged", partial: "partial, gaps over 10 min", gap: "no readings (edge syncing / offline)" };
+  el.replaceChildren(...u.buckets.map((b) => {
+    const i = document.createElement("i");
+    i.dataset.s = b.status;
+    if (b.status === "ok" && b.source) i.dataset.src = b.source;
+    const t = new Date(b.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    i.dataset.tip = `${t} · ${STATUS[b.status]} · ${b.count.toLocaleString()} readings${b.source ? ` · ${SRC[b.source] || b.source}` : ""}`;
+    return i;
+  }));
+  if (!el.dataset.wired) {
+    el.dataset.wired = "1";
+    el.addEventListener("pointerover", (e) => { if (e.target.dataset.tip) readout.textContent = e.target.dataset.tip; });
+    el.addEventListener("pointerleave", () => (readout.textContent = ""));
+  }
+}
+
+async function refreshInsights() {
+  try {
+    const [hm, up] = await Promise.all([app.src.heatmap(), app.src.uptime()]);
+    renderHeatmap(hm); renderUptime(up);
+  } catch (e) { console.warn(e); }
+}
+
 // ──────────────────────────────────────────────────────────────── loading ──
 async function tick() {
   try { renderLive(await app.src.snapshot()); }
@@ -294,7 +371,7 @@ async function setScenario(key, announce = true) {
   await app.src.setConfig({ data_mode: "simulated", sim_scenario: key });
   if (announce) toast(`Fault Replay · ${SCENARIO_LABEL[key]}`);
   await tick();                                  // instant response
-  refreshHistory(); refreshAlerts();
+  refreshHistory(); refreshAlerts(); refreshInsights();
 }
 
 // ─────────────────────────────────────────────────────────────── controls ──
@@ -387,7 +464,8 @@ const flow = createFlow($("flow"));
   await tick();
   ["sourceSeg", "rangeSeg", "impactSeg"].forEach((id) => syncSeg($(id), false));
   document.fonts?.ready.then(() => ["sourceSeg", "rangeSeg", "impactSeg"].forEach((id) => syncSeg($(id), false)));
-  refreshHistory(); refreshImpact(); refreshAlerts();
+  refreshHistory(); refreshImpact(); refreshAlerts(); refreshInsights();
+  setInterval(refreshInsights, 30000);
   setInterval(tick, 3000);
   setInterval(() => { refreshHistory(); refreshAlerts(); }, app.src.kind === "mock" ? 3000 : 6000);
   setInterval(refreshImpact, 30000);

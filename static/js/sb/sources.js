@@ -18,6 +18,8 @@ export class ApiSource {
   resolve(id) { return this.#j(`/api/alerts/${id}/resolve`, { method: "POST" }); }
   getConfig() { return this.#j("/api/config"); }
   setConfig(body) { return this.#j("/api/config", { method: "POST", body }); }
+  heatmap() { return this.#j("/api/heatmap?days=7"); }
+  uptime() { return this.#j("/api/uptime?hours=24"); }
 }
 
 // ───────────────────────────────────────────────────────────── mock stream ──
@@ -47,15 +49,15 @@ export class MockSource {
   soc = 84; n = 0; rows = []; alertsList = []; nextId = 1; window = [];
 
   constructor() {
-    // 48h of 5-minute history so every chart range has data
-    const now = Date.now();
+    // 7 days of 5-minute history: dust builds up over the week, tree shade every day 15:00–16:00
+    const now = Date.now(), start = now - 7 * 864e5;
     let soc = 55;
-    for (let t = now - 48 * 3600e3; t < now - 3e3; t += 300e3) {
+    for (let t = start; t < now - 3e3; t += 300e3) {
       const d = new Date(t), h = d.getHours() + d.getMinutes() / 60;
       const s = Math.max(0, Math.sin((Math.PI * (h - 6)) / 12));
       const g = 950 * s * (1 - 0.2 * Math.max(0, Math.sin(t / 7e6)) ** 6), ta = 27 + 6 * s;
       const exp = expected(g, ta, this.cfg.panel_rated_watts);
-      const pv = exp * 0.95 * rnd(0.98, 1.02);
+      const pv = exp * (1 - 0.13 * ((t - start) / (now - start))) * (d.getHours() === 15 ? 0.58 : 1) * rnd(0.98, 1.02);
       const load = (h >= 18 && h <= 22 ? 420 : 210) + rnd(-15, 15);
       soc = Math.min(100, Math.max(15, soc + ((pv - load) * 300) / 3600 / this.cfg.battery_capacity_wh * 100));
       this.rows.push(this.#row(new Date(t), g, ta, exp, pv, load, soc));
@@ -98,7 +100,7 @@ export class MockSource {
     this.rows.push(r);
     this.window.push(r);
     if (this.window.length > 30) this.window.shift();
-    if (this.rows.length > 2000) this.rows.splice(0, this.rows.length - 2000);
+    if (this.rows.length > 4000) this.rows.splice(0, this.rows.length - 4000);
   }
 
   #classify() {
@@ -166,6 +168,37 @@ export class MockSource {
         currency: this.cfg.currency_symbol, lost_kwh: integ(rows, (r) => (r.efficiency_pct === null ? 0 : Math.max(0, r.expected_pv_watts - r.pv_watts))) };
     }
     return out;
+  }
+
+  async heatmap() {
+    const days = [], cells = [], hours = Array.from({ length: 13 }, (_, i) => i + 6);
+    const acc = new Map();
+    for (const r of this.rows) {
+      if (r.efficiency_pct === null || r.irradiance_wm2 < 150) continue;
+      const t = new Date(r.timestamp), k = `${t.toDateString()}|${t.getHours()}`;
+      const a = acc.get(k) || [0, 0]; a[0] += r.efficiency_pct; a[1]++; acc.set(k, a);
+    }
+    for (let d = 6; d >= 0; d--) {
+      const day = new Date(); day.setHours(0, 0, 0, 0); day.setDate(day.getDate() - d);
+      days.push(`${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`);
+      cells.push(hours.map((h) => { const a = acc.get(`${day.toDateString()}|${h}`); return a ? { eff: a[0] / a[1], n: a[1] } : null; }));
+    }
+    return { days, hours, cells };
+  }
+
+  async uptime() {
+    const end = Date.now(), span = 24 * 3600e3, step = span / 96, buckets = [];
+    const ts = this.rows.map((r) => [new Date(r.timestamp).getTime(), r.source]);
+    for (let i = 0; i < 96; i++) {
+      const a = end - span + i * step, b = a + step;
+      const inside = ts.filter(([t]) => t >= a && t < b);
+      buckets.push({ start: new Date(a).toISOString(), status: inside.length ? "ok" : "gap", count: inside.length,
+        longest_gap_s: inside.length ? 300 : Math.round(step / 1000), source: inside.length ? inside[inside.length - 1][1] : null });
+    }
+    const ok = buckets.filter((x) => x.status === "ok").length;
+    const gaps = buckets.filter((x) => x.status !== "ok");
+    return { buckets, uptime_pct: (ok / 96) * 100, readings: buckets.reduce((s, x) => s + x.count, 0),
+      longest_gap_s: Math.max(0, ...gaps.map((x) => x.longest_gap_s)), last_gap: gaps.length ? gaps[gaps.length - 1].start : null };
   }
 
   async alerts(all) { return this.alertsList.filter((a) => all || !a.is_resolved); }

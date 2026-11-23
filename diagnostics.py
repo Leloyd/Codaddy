@@ -20,6 +20,8 @@ STATES = {
                 "advice": "PV current dropped sharply while voltage held. Check for new obstructions: trees, antennas, laundry, debris."},
     "FAULT": {"color": "red", "label": "Hardware / String Fault",
               "advice": "Near-zero PV output despite strong sun. Inspect PV breaker, MC4 connectors, fuses and string wiring."},
+    "CURTAILED": {"color": "slate", "label": "Battery Full",
+                  "advice": "Charge controller is limiting PV to match the load, so yield isn't judged until the battery can absorb more."},
     "IDLE": {"color": "slate", "label": "Low Light",
              "advice": "Not enough sunlight to judge array performance (night, dawn/dusk or heavy overcast)."},
 }
@@ -45,12 +47,20 @@ def efficiency_pct(actual, expected):
     return round(min(actual / expected * 100.0, 130.0), 1)
 
 
+def curtailed(r):
+    """Battery full and PV throttled down to the load: low yield here is not a panel problem."""
+    return (r.get("bat_soc") or 0) >= 98.5 and (r.get("pv_watts") or 0) <= (r.get("load_watts") or 0) * 1.15 + 25
+
+
 def classify(readings):
     """Classify array health from recent readings (oldest → newest).
 
     Returns {"state", "confidence", "reason", "efficiency", ...STATES[state]}.
     Rules are checked from most to least severe.
     """
+    if readings and curtailed(readings[-1]) and (readings[-1].get("irradiance_wm2") or 0) >= MIN_IRRADIANCE:
+        return _result("CURTAILED", 1.0, f"Battery at {readings[-1]['bat_soc']:.0f}% and PV throttled to "
+                       f"{readings[-1].get('pv_watts') or 0:.0f} W to match the load.", None)
     lit = [r for r in readings if (r.get("irradiance_wm2") or 0) >= MIN_IRRADIANCE
            and r.get("efficiency_pct") is not None]
     if not readings or not lit or lit[-1] is not readings[-1]:
@@ -166,3 +176,57 @@ def health_score(avg_eff, open_alerts):
     base = 100.0 if avg_eff is None else min(avg_eff, 100.0)
     penalty = sum({"CRITICAL": 25, "WARNING": 10, "INFO": 2}.get(a["severity"], 0) for a in open_alerts)
     return max(0, round(base - penalty))
+
+
+# ------------------------------------------------- heatmap & gateway uptime ---
+
+def efficiency_heatmap(rows, days, hours, today):
+    """Mean efficiency per (day, hour) for lit readings. rows need timestamp/efficiency_pct/irradiance_wm2.
+
+    Returns {"days": [date...oldest→newest], "hours": [...], "cells": [[{eff, n} | None]]}.
+    """
+    from collections import defaultdict
+    dates = [today - timedelta(days=d) for d in range(days - 1, -1, -1)]
+    acc = defaultdict(lambda: [0.0, 0])
+    for r in rows:
+        eff = r.get("efficiency_pct")
+        if eff is None or (r.get("irradiance_wm2") or 0) < MIN_IRRADIANCE:
+            continue
+        key = (r["timestamp"].date(), r["timestamp"].hour)
+        acc[key][0] += eff
+        acc[key][1] += 1
+    cells = [[({"eff": round(acc[(d, h)][0] / acc[(d, h)][1], 1), "n": acc[(d, h)][1]}
+               if (d, h) in acc else None) for h in hours] for d in dates]
+    return {"days": [d.isoformat() for d in dates], "hours": list(hours), "cells": cells}
+
+
+def uptime_buckets(rows, start, end, bucket=timedelta(minutes=15), max_gap=MAX_GAP):
+    """Classify each time bucket as ok / partial (data with gaps > max_gap) / gap (no data)."""
+    stamps = [r["timestamp"] for r in rows]
+    sources = [r.get("source") for r in rows]
+    out, i, prev = [], 0, None
+    t = start
+    while t < end:
+        t_end = min(t + bucket, end)
+        inside, srcs = [], set()
+        while i < len(stamps) and stamps[i] < t_end:
+            if stamps[i] >= t:
+                inside.append(stamps[i])
+                srcs.add(sources[i])
+            else:
+                prev = stamps[i]
+            i += 1
+        if not inside:
+            status, longest = "gap", t_end - t
+        else:
+            edges = ([prev] if prev and t - prev <= max_gap else [t]) + inside
+            if t_end < end or (end - inside[-1]) > max_gap:
+                edges.append(t_end)
+            longest = max((b - a for a, b in zip(edges, edges[1:])), default=timedelta(0))
+            status = "ok" if longest <= max_gap else "partial"
+            prev = inside[-1]
+        out.append({"start": t, "status": status, "count": len(inside), "longest_gap_s": int(longest.total_seconds()),
+                    "source": sorted(s for s in srcs if s)[0] if srcs - {None} else None})
+        t = t_end
+    covered = sum(1 for b in out if b["status"] == "ok") + 0.5 * sum(1 for b in out if b["status"] == "partial")
+    return {"buckets": out, "uptime_pct": round(covered / len(out) * 100, 1) if out else 0.0}

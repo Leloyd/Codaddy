@@ -9,7 +9,7 @@ python3 -m venv venv && venv/bin/pip install -r requirements.txt
 venv/bin/python app.py          # http://localhost:5000
 ```
 
-On first boot it creates `solarbridge.db` (SQLite), seeds 48 h of history, and starts the poller inside the app. The app opens in **Simulated Fault Replay** mode, so the demo works without any hardware.
+On first boot it creates `solarbridge.db` (SQLite), seeds 7 days of history (dust building up over the week plus a recurring 15:00 shadow, so the heatmap has a story to show), and starts the poller inside the app. The app opens in **Simulated Fault Replay** mode, so the demo works without any hardware.
 
 ### Using MySQL instead of SQLite
 
@@ -29,6 +29,7 @@ venv/bin/python poller.py                  # worker only
 ## Dashboard
 
 - `/`: the command center: KPI strip, live power-flow diagram, expected vs actual yield chart, "Why is power low?" diagnosis with one-click fixes, brownout runtime advisor and SDG 7 scorecard. It has light and dark themes (toggle in the top bar, or `?theme=dark` for a kiosk screen).
+- **Efficiency heatmap** (hour × last 7 days) makes recurring shading and gradual soiling visible at a glance. **Gateway uptime ribbon** shows 24 h of polling health and any Edge Syncing gaps.
 - `/?mock=1`: forces the built-in browser mock stream. The page also falls back to it automatically if the backend can't be reached.
 - `/classic`: the original simple dashboard.
 
@@ -59,7 +60,7 @@ The parser accepts JSON (nested is fine) or plain label/value HTML, and recogniz
 
 ## Files
 
-- `app.py`: Flask routes. REST API: `/api/live` (alias `/api/telemetry`), `/api/history`, `/api/impact`, `/api/alerts`, `/api/config`, `/api/runtime?shed=150`. Audit report: `/report` (print to PDF or `?download=1`)
+- `app.py`: Flask routes. REST API: `/api/live` (alias `/api/telemetry`), `/api/history`, `/api/impact`, `/api/alerts`, `/api/config`, `/api/runtime?shed=150`, `/api/heatmap?days=7`, `/api/uptime?hours=24`. Audit report: `/report` (print to PDF or `?download=1`)
 - `poller.py`: gateway scraper, Open-Meteo enrichment, rule runner and alert de-duplication
 - `diagnostics.py`: expected yield, the classifier, runtime, energy and impact math (pure functions)
 - `simulator.py`: synthetic scenarios and recording replay
