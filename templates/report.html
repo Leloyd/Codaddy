@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maintenance &amp; Audit Report — {{ cfg.site_name }}</title>
+  <style>
+    :root { --ink:#16202b; --muted:#5d6b7a; --line:#dde3ea; --green:#1f9d5c; --yellow:#b58a00; --orange:#c96a0a; --red:#c73636; --slate:#5d6b7a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f3f5f8; color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .page { max-width: 860px; margin: 24px auto; background: #fff; padding: 40px 48px; border-radius: 12px; box-shadow: 0 2px 12px rgb(0 0 0 / .06); }
+    header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--ink); padding-bottom: 14px; }
+    h1 { margin: 0; font-size: 22px; } h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 28px 0 10px; }
+    .meta { text-align: right; color: var(--muted); font-size: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .tile b { display: block; font-size: 22px; font-family: ui-monospace, Menlo, monospace; }
+    .tile span { color: var(--muted); font-size: 12px; }
+    .score { display: flex; gap: 22px; align-items: center; }
+    .score .num { font: 700 56px/1 ui-monospace, Menlo, monospace; }
+    .state { display: inline-block; padding: 3px 10px; border-radius: 99px; color: #fff; font-size: 12px; font-weight: 600; }
+    .c-green { background: var(--green); } .c-yellow { background: var(--yellow); } .c-orange { background: var(--orange); } .c-red { background: var(--red); } .c-slate { background: var(--slate); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; }
+    .sev-CRITICAL { color: var(--red); font-weight: 600; } .sev-WARNING { color: var(--yellow); font-weight: 600; }
+    ol li { margin-bottom: 6px; }
+    .toolbar { max-width: 860px; margin: 16px auto 0; display: flex; gap: 8px; justify-content: flex-end; }
+    .toolbar a, .toolbar button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; color: var(--ink); text-decoration: none; }
+    .toolbar button { background: var(--ink); color: #fff; border-color: var(--ink); }
+    footer { margin-top: 32px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+    @media print { body { background: #fff; } .page { box-shadow: none; margin: 0; padding: 0; max-width: none; } .toolbar { display: none; } }
+    @media (max-width: 640px) { .page { padding: 24px 18px; margin: 0; border-radius: 0; } .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+<div class="toolbar">
+  <a href="?days=1">24 h</a><a href="?days=7">7 days</a><a href="?days=30">30 days</a>
+  <a href="?days={{ days }}&download=1">Download HTML</a>
+  <button onclick="window.print()">Save as PDF</button>
+</div>
+<div class="page">
+  <header>
+    <div>
+      <h1>Solar Maintenance &amp; Audit Report</h1>
+      <div>{{ cfg.site_name }}</div>
+    </div>
+    <div class="meta">
+      Generated {{ generated.strftime('%Y-%m-%d %H:%M') }}<br>
+      Period: last {{ days }} day{{ 's' if days > 1 }} · {{ readings }} readings<br>
+      {{ cfg.panel_rated_watts|int }} W array · {{ cfg.battery_capacity_wh|int }} Wh battery
+    </div>
+  </header>
+
+  <h2>System health</h2>
+  <div class="score">
+    <div class="num">{{ health }}<span style="font-size:20px;color:var(--muted)">/100</span></div>
+    <div>
+      Current state: <span class="state c-{{ diag.color }}">{{ diag.label }}</span><br>
+      Average performance ratio: <b>{{ avg_eff if avg_eff is not none else '—' }}%</b> of weather-adjusted expected output<br>
+      <span style="color:var(--muted)">{{ diag.reason }}</span>
+    </div>
+  </div>
+
+  <h2>Energy &amp; SDG 7 impact</h2>
+  <div class="grid">
+    <div class="tile"><b>{{ impact.kwh }}</b><span>kWh clean energy harvested</span></div>
+    <div class="tile"><b>{{ impact.co2_kg }}</b><span>kg CO₂ avoided</span></div>
+    <div class="tile"><b>{{ impact.currency }}{{ '{:,.2f}'.format(impact.savings) }}</b><span>utility savings</span></div>
+    <div class="tile"><b style="color:var(--orange)">{{ lost_kwh }}</b><span>kWh lost ({{ impact.currency }}{{ '{:,.2f}'.format(lost_money) }})</span></div>
+  </div>
+
+  <h2>Recommended actions</h2>
+  <ol>{% for a in actions %}<li>{{ a }}</li>{% endfor %}</ol>
+
+  <h2>Flagged events</h2>
+  {% if alerts %}
+  <table>
+    <thead><tr><th>When</th><th>Severity</th><th>Category</th><th>Finding</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for a in alerts %}
+      <tr>
+        <td style="white-space:nowrap">{{ a.created_at.strftime('%b %d %H:%M') }}</td>
+        <td class="sev-{{ a.severity }}">{{ a.severity }}</td>
+        <td>{{ a.category.replace('_', ' ') }}</td>
+        <td>{{ a.message }}</td>
+        <td>{{ 'Resolved' if a.is_resolved else 'Open' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>No diagnostic events in this period.</p>{% endif %}
+
+  <footer>
+    SolarBridge AI · Expected yield = rated W × (irradiance ÷ 1000) × temperature factor × {{ '%.2f'|format(0.90) }} system derate.
+    CO₂ factor {{ cfg.grid_emission_kg_kwh }} kg/kWh · tariff {{ impact.currency }}{{ cfg.electricity_rate_kwh }}/kWh.
+  </footer>
+</div>
+</body>
+</html>

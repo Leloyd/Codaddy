@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SolarBridge AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='5' fill='%23f5b301'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" class="logo" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><g stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></g></svg>
+    <div>
+      <div class="brand-name">SolarBridge <span>AI</span></div>
+      <div class="site" id="siteName">—</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <span class="badge" id="linkBadge" title=""><i></i><b>Connecting…</b></span>
+    <div class="seg" role="group" aria-label="Data source">
+      <button data-mode="live">Live Hardware</button>
+      <button data-mode="simulated">Simulated Fault Replay</button>
+    </div>
+    <select id="scenario" aria-label="Replay scenario">
+      {% for key, desc in scenarios.items() %}<option value="{{ key }}" title="{{ desc }}">{{ key|capitalize }}</option>{% endfor %}
+    </select>
+    <a class="btn ghost" href="/report" target="_blank" rel="noopener">Audit report</a>
+    <button class="btn ghost icon" id="openSettings" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+  <!-- Diagnostic verdict -->
+  <section class="verdict" id="verdict" data-color="slate">
+    <div class="verdict-eyebrow">Why is power low?</div>
+    <div class="verdict-row">
+      <div>
+        <h1 id="verdictLabel">Analysing…</h1>
+        <p id="verdictReason" class="muted"></p>
+        <p id="verdictAdvice"></p>
+      </div>
+      <div class="pr">
+        <div class="pr-num" id="prNum">—</div>
+        <div class="pr-cap">performance ratio<br><span class="muted">actual ÷ weather-expected</span></div>
+      </div>
+    </div>
+    <div class="scale" aria-hidden="true">
+      <span data-s="FAULT">Fault</span><span data-s="SHADING">Shading</span>
+      <span data-s="SOILING">Soiling</span><span data-s="OPTIMAL">Optimal</span>
+    </div>
+  </section>
+
+  <!-- Live gauges -->
+  <section class="gauges">
+    <article class="card">
+      <h2>Solar input</h2>
+      <div class="big"><span id="pvW">—</span><small>W</small></div>
+      <div class="bar"><i id="pvBar"></i><em id="expMark" title="Expected"></em></div>
+      <dl class="kv">
+        <div><dt>Expected</dt><dd id="pvExp">—</dd></div>
+        <div><dt>V / A</dt><dd id="pvVA">—</dd></div>
+        <div><dt>Irradiance</dt><dd id="irr">—</dd></div>
+      </dl>
+    </article>
+
+    <article class="card">
+      <h2>Battery</h2>
+      <div class="soc">
+        <svg viewBox="0 0 120 120" class="ring">
+          <circle cx="60" cy="60" r="50" class="ring-bg"/>
+          <circle cx="60" cy="60" r="50" class="ring-fg" id="socRing" pathLength="100"/>
+          <line x1="104" y1="60" x2="116" y2="60" class="ring-floor" id="floorMark"/>
+        </svg>
+        <div class="soc-text"><span id="soc">—</span><small>%</small></div>
+      </div>
+      <dl class="kv">
+        <div><dt>Voltage</dt><dd id="batV">—</dd></div>
+        <div><dt>DoD floor</dt><dd id="dod">—</dd></div>
+      </dl>
+    </article>
+
+    <article class="card">
+      <h2>Facility load</h2>
+      <div class="big"><span id="loadW">—</span><small>W</small></div>
+      <dl class="kv">
+        <div><dt>Ambient</dt><dd id="temp">—</dd></div>
+        <div><dt>Weather</dt><dd id="wsrc">—</dd></div>
+        <div><dt>Last reading</dt><dd id="age">—</dd></div>
+      </dl>
+    </article>
+
+    <article class="card">
+      <h2>Net power flow</h2>
+      <div class="flow" id="flow" data-dir="balanced">
+        <div class="flow-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 4v16M5 13l7 7 7-7"/></svg>
+        </div>
+        <div>
+          <div class="big"><span id="netW">—</span><small>W</small></div>
+          <div class="flow-label" id="flowLabel">—</div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- Chart -->
+  <section class="card chart-card">
+    <div class="card-head">
+      <h2>Actual vs. expected output</h2>
+      <div class="seg small" id="range">
+        <button data-h="1">1h</button><button data-h="6" class="on">6h</button>
+        <button data-h="24">24h</button><button data-h="48">48h</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="split">
+    <!-- Runtime & load advisor -->
+    <article class="card runtime">
+      <h2>Brownout backup runtime</h2>
+      <div class="countdown">
+        <div class="cd-num" id="runtime">—</div>
+        <div class="muted" id="runtimeCap">at current load</div>
+      </div>
+      <p class="formula muted">Capacity × (SoC − DoD floor) ÷ Load</p>
+
+      <h3>What-if load shedding</h3>
+      <div class="appliances" id="appliances">
+        <label><input type="checkbox" data-w="150"> Aircon fan mode / big fan <b>150 W</b></label>
+        <label><input type="checkbox" data-w="120"> Refrigerator (duty cycle) <b>120 W</b></label>
+        <label><input type="checkbox" data-w="60"> Desktop + monitor <b>60 W</b></label>
+        <label><input type="checkbox" data-w="40"> Extra lighting <b>40 W</b></label>
+      </div>
+      <label class="slider">
+        <span>Custom shed <b id="customVal">0 W</b></span>
+        <input type="range" id="custom" min="0" max="1000" step="10" value="0">
+      </label>
+      <div class="whatif" id="whatif">
+        <div><span class="muted">New load</span><b id="newLoad">—</b></div>
+        <div><span class="muted">New runtime</span><b id="newRuntime">—</b></div>
+        <div class="gain"><span class="muted">Extra backup</span><b id="gain">—</b></div>
+      </div>
+    </article>
+
+    <!-- SDG 7 impact -->
+    <article class="card impact">
+      <div class="card-head">
+        <h2>Clean energy scorecard <span class="sdg">SDG 7</span></h2>
+        <div class="seg small" id="impactRange">
+          <button data-k="today" class="on">Today</button><button data-k="week">7 days</button>
+          <button data-k="lifetime">Lifetime</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div><span class="stat" id="kwh">—</span><span class="muted">kWh harvested</span></div>
+        <div><span class="stat" id="co2">—</span><span class="muted">kg CO₂ avoided</span></div>
+        <div><span class="stat" id="savings">—</span><span class="muted">utility savings</span></div>
+        <div><span class="stat warn" id="lost">—</span><span class="muted">kWh lost to faults/dust</span></div>
+      </div>
+      <p class="muted small-print" id="impactNote"></p>
+
+      <div class="card-head alerts-head">
+        <h2>Maintenance alerts</h2>
+        <label class="muted small-print"><input type="checkbox" id="showResolved"> show resolved</label>
+      </div>
+      <ul class="alerts" id="alerts"><li class="muted">No alerts.</li></ul>
+    </article>
+  </section>
+</main>
+
+<!-- Settings modal -->
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h2>Hardware bridge &amp; site config</h2>
+    <fieldset>
+      <legend>Gateway</legend>
+      <label>Site name <input name="site_name"></label>
+      <label>Gateway IP <input name="gateway_ip" placeholder="192.168.4.1"></label>
+      <label>Endpoint path <input name="gateway_path" placeholder="/status"></label>
+      <label>Polling interval (s) <input name="poll_interval_sec" type="number" min="2" max="60"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Array &amp; battery</legend>
+      <label>Panel capacity (W) <input name="panel_rated_watts" type="number" step="1"></label>
+      <label>Tilt (°) <input name="panel_tilt" type="number" step="1"></label>
+      <label>Azimuth (° , 0 = south) <input name="panel_azimuth" type="number" step="1"></label>
+      <label>Battery capacity (Wh) <input name="battery_capacity_wh" type="number" step="1"></label>
+      <label>Battery nominal (V) <input name="battery_nominal_v" type="number" step="0.1"></label>
+      <label>DoD floor (%) <input name="dod_floor_pct" type="number" step="1" min="0" max="90"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Location &amp; tariff</legend>
+      <label>Latitude <input name="latitude" type="number" step="0.0001"></label>
+      <label>Longitude <input name="longitude" type="number" step="0.0001"></label>
+      <label>Rate per kWh <input name="electricity_rate_kwh" type="number" step="0.01"></label>
+      <label>Currency symbol <input name="currency_symbol" maxlength="4"></label>
+      <label>Grid CO₂ (kg/kWh) <input name="grid_emission_kg_kwh" type="number" step="0.001"></label>
+    </fieldset>
+    <p class="muted small-print">Tip: 24 V 100 Ah LiFePO4 = 25.6 V × 100 Ah = 2560 Wh.</p>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+      <button value="save" class="btn primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="{{ url_for('static', filename='js/vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
